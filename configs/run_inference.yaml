@@ -1,9 +1,10 @@
 defaults:
   - user: default
   - machine: local
-  - callback: base 
+  - callback: base
   - data: bop
   - model: cnos
+  # - model: cnos_fast
   - _self_
 
 save_dir: ${machine.root_dir}/results/${name_exp}
