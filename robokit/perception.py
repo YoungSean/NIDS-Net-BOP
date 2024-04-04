@@ -399,7 +399,7 @@ class GroundingDINOObjectPredictor(ObjectPredictor):
         """
         try:
             _, image_tensor = self.image_transform_grounding(image_pil)
-            bboxes, conf, phrases = predict(self.model, image_tensor, det_text_prompt, box_threshold=0.15, text_threshold=0.15, device=self.device)
+            bboxes, conf, phrases = predict(self.model, image_tensor, det_text_prompt, box_threshold=0.10, text_threshold=0.10, device=self.device)
             return bboxes, phrases, conf        
         except Exception as e:
             self.logger.error(f"Error during model prediction: {e}")
@@ -419,12 +419,18 @@ class SegmentAnythingPredictor(ObjectPredictor):
     - predictor (SamPredictor): The predictor for the SAM model.
     """
 
-    def __init__(self):
+    def __init__(self, vit_model="vit_t"):
         """
         Initialize the SegmentAnythingPredictor object.
         """
         super(SegmentAnythingPredictor, self).__init__()
-        self.sam = sam_model_registry["vit_t"](checkpoint="ckpts/mobilesam/vit_t.pth")
+        sam_weight_path = {
+            "vit_t": "ckpts/mobilesam/vit_t.pth",
+            "vit_b": "ckpts/sam_weights/sam_vit_b_01ec64.pth",
+            "vit_h": "ckpts/sam_weights/sam_vit_h_4b8939.pth",
+            "vit_l": "ckpts/sam_weights/sam_vit_l_0b3195.pth",
+        }
+        self.sam = sam_model_registry[vit_model](checkpoint=sam_weight_path[vit_model])
         self.mask_generator = SamAutomaticMaskGenerator(self.sam)  # generate masks for entire image
         self.sam.to(device=self.device)
         self.sam.eval()

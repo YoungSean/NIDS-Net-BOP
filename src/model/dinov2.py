@@ -37,8 +37,12 @@ def crop_images_and_masks(images, masks, bboxes, img_size=224):
 
     for image, mask, bbox in zip(images, masks, bboxes):
         x0, y0, x1, y1 = bbox
+        if x0 == x1 or y0 == y1:
+            continue
         cropped_image = image[:, y0:y1, x0:x1]
         cropped_mask = mask[:, y0:y1, x0:x1]
+        if cropped_image.size(1) == 0 or cropped_image.size(2) == 0:
+            continue
         cropped_image = F.interpolate(cropped_image.unsqueeze(0), size=(img_size, img_size), mode='bicubic')
         cropped_mask = F.interpolate(cropped_mask.unsqueeze(0), size=(img_size, img_size), mode='bicubic')
 
@@ -107,6 +111,7 @@ class CustomDINOv2(pl.LightningModule):
         # )  # [N, 1, target_size, target_size]
         # return processed_masked_rgbs, processed_masks
         return cropped_imgs, cropped_masks
+
     @torch.no_grad()
     def compute_features(self, images, token_name, masks):
         if token_name == "x_norm_clstoken":

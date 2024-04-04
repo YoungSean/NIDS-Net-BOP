@@ -83,7 +83,7 @@ class CNOS(pl.LightningModule):
         )
         logging.info(f"Init CNOS done!")
         self.gdino = GroundingDINOObjectPredictor()
-        self.SAM = SegmentAnythingPredictor()
+        self.SAM = SegmentAnythingPredictor(vit_model="vit_l")
         logging.info("Initialize GDINO and SAM done!")
 
     def set_reference_objects(self):
@@ -255,17 +255,17 @@ class CNOS(pl.LightningModule):
 
         # run propoals
         proposal_stage_start_time = time.time()
-        # image_pil = Image.fromarray(image_np).convert("RGB")
-        # bboxes, phrases, gdino_conf = self.gdino.predict(image_pil, "objects")
-        # w, h = image_pil.size  # Get image width and height
-        # # Scale bounding boxes to match the original image size
-        # image_pil_bboxes = self.gdino.bbox_to_scaled_xyxy(bboxes, w, h)
-        # image_pil_bboxes, masks = self.SAM.predict(image_pil, image_pil_bboxes)
-        # proposals = dict()
-        # proposals["masks"] = masks.squeeze(1).to(torch.float32)  # to N x H x W, torch.float32 type as the output of fastSAM
-        # proposals["boxes"] = image_pil_bboxes
+        image_pil = Image.fromarray(image_np).convert("RGB")
+        bboxes, phrases, gdino_conf = self.gdino.predict(image_pil, "objects")
+        w, h = image_pil.size  # Get image width and height
+        # Scale bounding boxes to match the original image size
+        image_pil_bboxes = self.gdino.bbox_to_scaled_xyxy(bboxes, w, h)
+        image_pil_bboxes, masks = self.SAM.predict(image_pil, image_pil_bboxes)
+        proposals = dict()
+        proposals["masks"] = masks.squeeze(1).to(torch.float32)  # to N x H x W, torch.float32 type as the output of fastSAM
+        proposals["boxes"] = image_pil_bboxes
 
-        proposals = self.segmentor_model.generate_masks(image_np)
+        # proposals = self.segmentor_model.generate_masks(image_np)
 
         # init detections with masks and boxes
         detections = Detections(proposals)
