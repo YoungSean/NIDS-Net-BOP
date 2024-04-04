@@ -8,5 +8,5 @@ defaults:
   - _self_
 
 save_dir: ${machine.root_dir}/results/${name_exp}
-name_exp: cnos_exps
+name_exp: gd_ffa_match_thre0.2_exps
 dataset_name:

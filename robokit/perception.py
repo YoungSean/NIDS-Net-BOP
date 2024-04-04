@@ -25,9 +25,9 @@ from mobile_sam import sam_model_registry, SamAutomaticMaskGenerator, SamPredict
 from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
 
-os.system("python setup.py build develop --user")
-os.system("pip install packaging==21.3")
-warnings.filterwarnings("ignore")
+# os.system("python setup.py build develop --user")
+# os.system("pip install packaging==21.3")
+# warnings.filterwarnings("ignore")
 
 
 class Logger(object):
@@ -399,7 +399,7 @@ class GroundingDINOObjectPredictor(ObjectPredictor):
         """
         try:
             _, image_tensor = self.image_transform_grounding(image_pil)
-            bboxes, conf, phrases = predict(self.model, image_tensor, det_text_prompt, box_threshold=0.25, text_threshold=0.25, device=self.device)
+            bboxes, conf, phrases = predict(self.model, image_tensor, det_text_prompt, box_threshold=0.15, text_threshold=0.15, device=self.device)
             return bboxes, phrases, conf        
         except Exception as e:
             self.logger.error(f"Error during model prediction: {e}")

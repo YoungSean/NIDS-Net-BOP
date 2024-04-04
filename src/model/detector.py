@@ -15,7 +15,36 @@ import time
 import glob
 from functools import partial
 import multiprocessing
+from robokit.perception import GroundingDINOObjectPredictor, SegmentAnythingPredictor
 
+def stableMatching(preferenceMat):
+    """
+    Compute Stable Matching
+    """
+    mDict = dict()
+
+    engageMatrix = np.zeros_like(preferenceMat)
+    for i in range(preferenceMat.shape[0]):
+        tmp = preferenceMat[i]
+        sortIndices = np.argsort(tmp)[::-1]
+        mDict[i] = sortIndices.tolist()
+
+    freeManList = list(range(preferenceMat.shape[0]))
+
+    while freeManList:
+        curMan = freeManList.pop(0)
+        curWoman = mDict[curMan].pop(0)
+        if engageMatrix[:, curWoman].sum() == 0:
+            engageMatrix[curMan, curWoman] = 1
+        else:
+            engagedMan = np.where(engageMatrix[:, curWoman] == 1)[0][0]
+            if preferenceMat[engagedMan, curWoman] > preferenceMat[curMan, curWoman]:
+                freeManList.append(curMan)
+            else:
+                engageMatrix[engagedMan, curWoman] = 0
+                engageMatrix[curMan, curWoman] = 1
+                freeManList.append(engagedMan)
+    return engageMatrix
 
 class CNOS(pl.LightningModule):
     def __init__(
@@ -51,6 +80,9 @@ class CNOS(pl.LightningModule):
             ]
         )
         logging.info(f"Init CNOS done!")
+        self.gdino = GroundingDINOObjectPredictor()
+        self.SAM = SegmentAnythingPredictor()
+        logging.info("Initialize GDINO and SAM done!")
 
     def set_reference_objects(self):
         os.makedirs(
@@ -74,8 +106,9 @@ class CNOS(pl.LightningModule):
                 desc="Computing descriptors ...",
             ):
                 ref_imgs = self.ref_dataset[idx]["templates"].to(self.device)
+                ref_masks = self.ref_dataset[idx]["template_masks"].to(self.device)
                 ref_feats = self.descriptor_model.compute_features(
-                    ref_imgs, token_name="x_norm_clstoken"
+                    ref_imgs, token_name="x_norm_clstoken", masks=ref_masks
                 )
                 self.ref_data["descriptors"].append(ref_feats)
 
@@ -124,10 +157,63 @@ class CNOS(pl.LightningModule):
             raise NotImplementedError
 
         # assign each proposal to the object with highest scores
-        score_per_proposal, assigned_idx_object = torch.max(
+        score_per_proposal_1, assigned_idx_object_1 = torch.max(
             score_per_proposal_and_object, dim=-1
         )  # N_query
+        score_per_proposal = []
+        assigned_idx_object = []
+        sims = score_per_proposal_and_object
+        num_object = sims.shape[1]
+        num_proposals = sims.shape[0]
+        # ------------ ranking and sorting ------------
+        # Initialization
+        sel_obj_ids = [str(v) for v in list(np.arange(num_object))]  # ids for selected obj
+        sel_roi_ids = [str(v) for v in list(np.arange(num_proposals))]  # ids for selected roi
 
+        # Padding
+        max_len = max(len(sel_roi_ids), len(sel_obj_ids))
+        sel_sims_symmetric = torch.ones((max_len, max_len)) * -1
+        sel_sims_symmetric[:len(sel_roi_ids), :len(sel_obj_ids)] = sims.clone()
+
+        pad_len = abs(len(sel_roi_ids) - len(sel_obj_ids))
+        if len(sel_roi_ids) > len(sel_obj_ids):
+            pad_obj_ids = [str(i) for i in range(num_object, num_object + pad_len)]
+            sel_obj_ids += pad_obj_ids
+        elif len(sel_roi_ids) < len(sel_obj_ids):
+            pad_roi_ids = [str(i) for i in range(len(sel_roi_ids), len(sel_roi_ids) + pad_len)]
+            sel_roi_ids += pad_roi_ids
+
+        # ------------ stable matching ------------
+        matchedMat = stableMatching(
+            sel_sims_symmetric.detach().data.cpu().numpy())  # predMat is raw predMat
+        predMat_row = np.zeros_like(
+            sel_sims_symmetric.detach().data.cpu().numpy())  # predMat_row is the result after stable matching
+        Matches = dict()
+        for i in range(matchedMat.shape[0]):
+            tmp = matchedMat[i, :]
+            a = tmp.argmax()
+            predMat_row[i, a] = tmp[a]
+            Matches[sel_roi_ids[i]] = sel_obj_ids[int(a)]
+
+        # ------------ thresholding ------------
+        preds = Matches.copy()
+        # ------------ save per scene results ------------
+        for k, v in preds.items():
+            if int(k) >= num_proposals:  # since the number of proposals is less than the number of object features
+                break
+
+            if int(v) >= num_object:
+                score_per_proposal.append(0.0) #will ignore this proposal later
+                assigned_idx_object.append(-1)
+                continue
+
+            # if float(sims[int(k), int(v)]) < score_thresh_predefined:
+            #     continue
+
+            score_per_proposal.append(float(sims[int(k), int(v)]))
+            assigned_idx_object.append(int(v))
+        score_per_proposal = torch.tensor(score_per_proposal).to(proposal_decriptors.device)
+        assigned_idx_object = torch.tensor(assigned_idx_object).to(proposal_decriptors.device)
         idx_selected_proposals = torch.arange(
             len(score_per_proposal), device=score_per_proposal.device
         )[score_per_proposal > self.matching_config.confidence_thresh]
@@ -158,7 +244,17 @@ class CNOS(pl.LightningModule):
 
         # run propoals
         proposal_stage_start_time = time.time()
-        proposals = self.segmentor_model.generate_masks(image_np)
+        image_pil = Image.fromarray(image_np).convert("RGB")
+        bboxes, phrases, gdino_conf = self.gdino.predict(image_pil, "objects")
+        w, h = image_pil.size  # Get image width and height
+        # Scale bounding boxes to match the original image size
+        image_pil_bboxes = self.gdino.bbox_to_scaled_xyxy(bboxes, w, h)
+        image_pil_bboxes, masks = self.SAM.predict(image_pil, image_pil_bboxes)
+        proposals = dict()
+        proposals["masks"] = masks.squeeze(1).to(torch.float32)  # to N x H x W, torch.float32 type as the output of fastSAM
+        proposals["boxes"] = image_pil_bboxes
+
+        # proposals2 = self.segmentor_model.generate_masks(image_np)
 
         # init detections with masks and boxes
         detections = Detections(proposals)
