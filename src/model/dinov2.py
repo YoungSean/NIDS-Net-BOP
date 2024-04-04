@@ -116,6 +116,8 @@ class CustomDINOv2(pl.LightningModule):
                 # features = self.model(images)
                 emb = self.model.forward_features(images)
                 grid = emb["x_norm_patchtokens"].detach()
+                if len(masks.shape) == 3:
+                    masks = masks.unsqueeze(1)
                 # masks = masks.unsqueeze(1)
                 mask_size = masks.size(2) // 14
                 grid = grid.view(len(images), mask_size, mask_size, -1)

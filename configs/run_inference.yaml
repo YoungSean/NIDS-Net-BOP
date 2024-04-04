@@ -8,5 +8,5 @@ defaults:
   - _self_
 
 save_dir: ${machine.root_dir}/results/${name_exp}
-name_exp: gd_ffa_match_thre0.2_exps
+name_exp: sam_ffa_avg5_224_exps
 dataset_name:
