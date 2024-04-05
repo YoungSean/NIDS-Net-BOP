@@ -23,7 +23,43 @@ import pytorch_lightning as pl
 from functools import partial
 import multiprocessing
 from src.dataloader.bop import BaseBOP
+import torch.nn.functional as F
 
+def crop_images_and_masks(images, masks, bboxes, img_size=224):
+    """
+    Crop images and masks according to the given bounding boxes.
+
+    Parameters:
+        images (torch.Tensor): Tensor of shape [batch_size, channels, height, width].
+        masks (torch.Tensor): Tensor of shape [batch_size, height, width].
+        bboxes (torch.Tensor): Tensor of shape [batch_size, 4] with each row [y1, x1, y2, x2].
+
+    Returns:
+        cropped_images (torch.Tensor): Tensor of cropped images.
+        cropped_masks (torch.Tensor): Tensor of cropped masks.
+    """
+    cropped_images = []
+    cropped_masks = []
+
+    for image, mask, bbox in zip(images, masks, bboxes):
+        x0, y0, x1, y1 = bbox
+        if x0 == x1 or y0 == y1:
+            continue
+        cropped_image = image[:, y0:y1, x0:x1]
+        cropped_mask = mask[:, y0:y1, x0:x1]
+        if cropped_image.size(1) == 0 or cropped_image.size(2) == 0:
+            continue
+        cropped_image = F.interpolate(cropped_image.unsqueeze(0), size=(img_size, img_size), mode='bicubic')
+        cropped_mask = F.interpolate(cropped_mask.unsqueeze(0), size=(img_size, img_size), mode='bicubic')
+
+        cropped_images.append(cropped_image)
+        cropped_masks.append(cropped_mask)
+
+    # Stack the list of tensors into a single tensor
+    cropped_images = torch.cat(cropped_images, dim=0)
+    cropped_masks = torch.cat(cropped_masks, dim=0)
+
+    return cropped_images, cropped_masks
 
 class BOPTemplatePBR(BaseBOP):
     def __init__(
@@ -197,10 +233,12 @@ class BOPTemplatePBR(BaseBOP):
     def __getitem__(self, idx):
         templates, boxes = [], []
         obj_ids = []
+        template_masks = []
         idx_range = range(
             idx * len(self.template_poses),
             (idx + 1) * len(self.template_poses),
         )
+        img_size = self.processing_config.image_size
         for i in idx_range:
             rgb_path = self.metaData.iloc[i].rgb_path
             obj_id = self.metaData.iloc[i].obj_id
@@ -222,16 +260,22 @@ class BOPTemplatePBR(BaseBOP):
             )
             boxes.append(mask.getbbox())
             image = torch.from_numpy(np.array(masked_rgb.convert("RGB")) / 255).float()
+            mask = torch.from_numpy(np.array(mask) / 255.0)
+            mask = mask.unsqueeze(0)
             templates.append(image)
+            template_masks.append(mask)
 
         assert (
             len(np.unique(obj_ids)) == 1
         ), f"Only support one object per batch but found {np.unique(obj_ids)}"
 
         templates = torch.stack(templates).permute(0, 3, 1, 2)
+        template_masks = torch.stack(template_masks, dim=0)
         boxes = torch.tensor(np.array(boxes))
+        # templates, template_masks = crop_images_and_masks(templates, template_masks, boxes, img_size=img_size)
         templates_croped = self.proposal_processor(images=templates, boxes=boxes)
-        return {"templates": self.rgb_transform(templates_croped)}
+        template_masks_croped = self.proposal_processor(images=template_masks, boxes=boxes)
+        return {"templates": self.rgb_transform(templates_croped), "template_masks": template_masks_croped}
 
 
 if __name__ == "__main__":

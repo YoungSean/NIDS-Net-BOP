@@ -8,5 +8,5 @@ defaults:
   - _self_
 
 save_dir: ${machine.root_dir}/results/${name_exp}
-name_exp: gsamH_thr0.1_ffa_avg5_224_exps
+name_exp: BPR_gsamH_thr0.1_ffa_avg5_224_exps
 dataset_name:

@@ -83,7 +83,7 @@ class CNOS(pl.LightningModule):
         )
         logging.info(f"Init CNOS done!")
         self.gdino = GroundingDINOObjectPredictor()
-        self.SAM = SegmentAnythingPredictor(vit_model="vit_l")
+        self.SAM = SegmentAnythingPredictor(vit_model="vit_h")
         logging.info("Initialize GDINO and SAM done!")
 
     def set_reference_objects(self):
@@ -95,7 +95,7 @@ class CNOS(pl.LightningModule):
         start_time = time.time()
         self.ref_data = {"descriptors": BatchedData(None)}
         descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors.pth")
-        vox_descriptors_path = osp.join(self.ref_dataset.template_dir, "lmo_object_features.json")
+        # vox_descriptors_path = osp.join(self.ref_dataset.template_dir, "lmo_object_features.json")
         if self.onboarding_config.rendering_type == "pbr":
             descriptors_path = descriptors_path.replace(".pth", "_pbr.pth")
         if (
