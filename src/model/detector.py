@@ -18,6 +18,62 @@ import multiprocessing
 from robokit.perception import GroundingDINOObjectPredictor, SegmentAnythingPredictor
 import json
 from torch import nn
+import torch.nn.functional as F
+import sys
+
+class ModifiedClipAdapter(nn.Module):
+    """
+    Modified version of the CLIP adapter for better performance.
+    Add Dropout layer.
+    """
+    def __init__(self, c_in, reduction=4, ratio=0.6):
+        super(ModifiedClipAdapter, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(c_in, c_in // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(c_in // reduction, c_in, bias=False),
+            nn.ReLU(inplace=True)
+        )
+        self.ratio = ratio
+
+    def forward(self, inputs):
+        inputs = F.normalize(inputs, dim=-1, p=2)
+        x = self.fc(inputs)
+        x = self.ratio * x + (1 - self.ratio) * inputs
+        return x
+
+class WeightAdapter(nn.Module):
+    """
+    Predict weights for each feature vector.
+    """
+    def __init__(self, c_in, reduction=4, scalar=10):
+        """
+
+        @param c_in: The channel size of the input feature vector
+        @param reduction: the reduction factor for the hidden layer
+        @param scalar: A scalar to scale the input feature vector
+        """
+        super(WeightAdapter, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(c_in, c_in // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            # nn.Dropout(0.5),
+            nn.Linear(c_in // reduction, c_in, bias=False),
+            nn.ReLU(inplace=True)
+        )
+        # self.ratio = ratio
+        self.scalar = scalar
+
+    def forward(self, inputs):
+        # inputs = F.normalize(inputs, dim=-1, p=2)
+        inputs = self.scalar * inputs
+        x = self.fc(inputs)
+        x = x.sigmoid()
+        # x = x * inputs + inputs
+        x = x * inputs
+
+        return x
 
 def stableMatching(preferenceMat):
     """
@@ -85,6 +141,22 @@ class CNOS(pl.LightningModule):
         self.gdino = GroundingDINOObjectPredictor()
         self.SAM = SegmentAnythingPredictor(vit_model="vit_h")
         logging.info("Initialize GDINO and SAM done!")
+        self.use_adapter = True
+        if self.use_adapter:
+            self.adapter_type = 'weight'
+            dataset_name = 'itodd'
+            if self.adapter_type == 'clip':
+                weight_name = f"{dataset_name}_clip_temp_0.05_epoch_100_lr_0.0001_bs_1024_vec_reduction_4_L2e4_vitl_reg_weights.pth"
+                model_path = os.path.join("./adapter_weights", weight_name)
+                self.adapter = ModifiedClipAdapter(1024, reduction=4, ratio=0.6).to('cuda')
+            else:
+                weight_name = f"bop_obj_shuffle_weight_0430_temp_0.05_epoch_500_lr_0.001_bs_32_weights.pth"
+                model_path = os.path.join("./adapter_weights", weight_name)
+                self.adapter = WeightAdapter(1024, reduction=4).to('cuda')
+            self.adapter.load_state_dict(torch.load(model_path))
+            # If you plan to only evaluate the model, switch to eval mode
+            self.adapter.eval()
+            print('Model weights loaded and model is set to evaluation mode.')
 
     def set_reference_objects(self):
         os.makedirs(
@@ -94,7 +166,7 @@ class CNOS(pl.LightningModule):
 
         start_time = time.time()
         self.ref_data = {"descriptors": BatchedData(None)}
-        descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors.pth")
+        descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors.pth") # for vitl_reg dinov2
         # vox_descriptors_path = osp.join(self.ref_dataset.template_dir, "lmo_object_features.json")
         if self.onboarding_config.rendering_type == "pbr":
             descriptors_path = descriptors_path.replace(".pth", "_pbr.pth")
@@ -102,13 +174,16 @@ class CNOS(pl.LightningModule):
             os.path.exists(descriptors_path)
             and not self.onboarding_config.reset_descriptors
         ):
-            self.ref_data["descriptors"] = torch.load(descriptors_path).to(self.device)
-            # with open(os.path.join(vox_descriptors_path), 'r') as f:
-            #     feat_dict = json.load(f)
-            #
-            # object_features = torch.Tensor(feat_dict['features']).cuda()
-            # self.ref_data["descriptors"] = object_features.view(8, -1, 1024)
-            # print("using my vox features")
+            # self.ref_data["descriptors"] = torch.load(descriptors_path).to(self.device)
+
+            adapter_descriptors_path = osp.join(self.ref_dataset.template_dir,
+                                                f'{self.adapter_type}_obj_shuffle2_0501_bs32_epoch_500_adapter_descriptors_pbr.json')
+            with open(os.path.join(adapter_descriptors_path), 'r') as f:
+                feat_dict = json.load(f)
+
+            object_features = torch.Tensor(feat_dict['features']).cuda()
+            self.ref_data["descriptors"] = object_features.view(-1, 42, 1024)
+            print("using adapted lmo object features")
         else:
             for idx in tqdm(
                 range(len(self.ref_dataset)),
@@ -131,6 +206,7 @@ class CNOS(pl.LightningModule):
         logging.info(
             f"Runtime: {end_time-start_time:.02f}s, Descriptors shape: {self.ref_data['descriptors'].shape}"
         )
+
 
     def move_to_device(self):
         self.descriptor_model.model = self.descriptor_model.model.to(self.device)
@@ -274,6 +350,9 @@ class CNOS(pl.LightningModule):
         )
         # compute descriptors
         query_decriptors = self.descriptor_model(image_np, detections)
+        if self.use_adapter:
+            with torch.no_grad():
+                query_decriptors = self.adapter(query_decriptors)
         proposal_stage_end_time = time.time()
 
         # matching descriptors
