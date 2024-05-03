@@ -21,6 +21,79 @@ from torch import nn
 import torch.nn.functional as F
 import sys
 
+class MaskedPatch_MatrixSimilarity(nn.Module):
+    def __init__(self, metric="cosine", chunk_size=64):
+        super(MaskedPatch_MatrixSimilarity, self).__init__()
+        self.metric = metric
+        self.chunk_size = chunk_size
+
+    def compute_straight(self, query, reference):
+        (N_query, N_patch, N_features) = query.shape
+        sim_matrix = torch.matmul(query, reference.permute(0, 2, 1))  # N_query x N_query_mask x N_refer_mask
+
+        # N2_ref score max
+        max_ref_patch_score = torch.max(sim_matrix, dim=-1).values
+        # N1_query score average
+        factor = torch.count_nonzero(query.sum(dim=-1), dim=-1) + 1e-6
+        scores = torch.sum(max_ref_patch_score, dim=-1) / factor  # N_query x N_objects x N_templates
+
+        return scores.clamp(min=0.0, max=1.0)
+
+    def compute_visible_ratio(self, query, reference, thred=0.5):
+
+        sim_matrix = torch.matmul(query, reference.permute(0, 2, 1))  # N_query x N_query_mask x N_refer_mask
+        sim_matrix = sim_matrix.max(1)[0]  # N_query x N_refer_mask
+        valid_patches = torch.count_nonzero(sim_matrix, dim=(1,)) + 1e-6
+
+        # fliter correspendence by thred
+        flitered_matrix = sim_matrix * (sim_matrix > thred)
+        sim_patches = torch.count_nonzero(flitered_matrix, dim=(1,))
+
+        visible_ratio = sim_patches / valid_patches
+
+        return visible_ratio
+
+    def compute_similarity(self, query, reference):
+        # all template computation
+        N_query = query.shape[0]
+        N_objects, N_templates = reference.shape[0], reference.shape[1]
+        references = reference.unsqueeze(0).repeat(N_query, 1, 1, 1, 1)
+        queries = query.unsqueeze(1).repeat(1, N_templates, 1, 1)
+
+        similarity = BatchedData(batch_size=None)
+        for idx_obj in range(N_objects):
+            sim_matrix = torch.matmul(queries, references[:, idx_obj].permute(0, 1, 3,
+                                                                              2))  # N_query x N_templates x N_query_mask x N_refer_mask
+            similarity.append(sim_matrix)
+        similarity.stack()
+        similarity = similarity.data
+        similarity = similarity.permute(1, 0, 2, 3, 4)  # N_query x N_objects x N_templates x N1_query x N2_ref
+
+        # N2_ref score max
+        max_ref_patch_score = torch.max(similarity, dim=-1).values
+        # N1_query score average
+        factor = torch.count_nonzero(query.sum(dim=-1), dim=-1)[:, None, None]
+        scores = torch.sum(max_ref_patch_score, dim=-1) / factor  # N_query x N_objects x N_templates
+
+        return scores.clamp(min=0.0, max=1.0)
+
+    def forward_by_chunk(self, query, reference):
+        # divide by N_query
+        batch_query = BatchedData(batch_size=self.chunk_size, data=query)
+        del query
+        scores = BatchedData(batch_size=self.chunk_size)
+        for idx_batch in range(len(batch_query)):
+            score = self.compute_similarity(batch_query[idx_batch], reference)
+            scores.cat(score)
+        return scores.data
+
+    def forward(self, qurey, reference):
+        if qurey.shape[0] > self.chunk_size:
+            scores = self.forward_by_chunk(qurey, reference)
+        else:
+            scores = self.compute_similarity(qurey, reference)
+        return scores
+
 class ModifiedClipAdapter(nn.Module):
     """
     Modified version of the CLIP adapter for better performance.
@@ -144,7 +217,7 @@ class CNOS(pl.LightningModule):
         self.use_adapter = True
         if self.use_adapter:
             self.adapter_type = 'weight'
-            dataset_name = 'itodd'
+            dataset_name = 'icbin'
             if self.adapter_type == 'clip':
                 weight_name = f"{dataset_name}_clip_temp_0.05_epoch_100_lr_0.0001_bs_1024_vec_reduction_4_L2e4_vitl_reg_weights.pth"
                 model_path = os.path.join("./adapter_weights", weight_name)
@@ -165,7 +238,7 @@ class CNOS(pl.LightningModule):
         logging.info("Initializing reference objects ...")
 
         start_time = time.time()
-        self.ref_data = {"descriptors": BatchedData(None)}
+        self.ref_data = {"descriptors": BatchedData(None), "appe_descriptors": BatchedData(None)}
         descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors.pth") # for vitl_reg dinov2
         # vox_descriptors_path = osp.join(self.ref_dataset.template_dir, "lmo_object_features.json")
         if self.onboarding_config.rendering_type == "pbr":
@@ -202,6 +275,32 @@ class CNOS(pl.LightningModule):
             # save the precomputed features for future use
             torch.save(self.ref_data["descriptors"], descriptors_path)
 
+        # Loading appearance descriptors
+        appe_descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors_appe.pth")
+        if self.onboarding_config.rendering_type == "pbr":
+            appe_descriptors_path = appe_descriptors_path.replace(".pth", "_pbr.pth")
+        if (
+            os.path.exists(appe_descriptors_path)
+            and not self.onboarding_config.reset_descriptors
+        ):
+            self.ref_data["appe_descriptors"] = torch.load(appe_descriptors_path).to(self.device)
+        else:
+            for idx in tqdm(
+                range(len(self.ref_dataset)),
+                desc="Computing appearance descriptors ...",
+            ):
+                ref_imgs = self.ref_dataset[idx]["templates"].to(self.device)
+                ref_masks = self.ref_dataset[idx]["template_masks"].to(self.device)
+                ref_feats = self.descriptor_model.compute_masked_patch_feature(
+                    ref_imgs, ref_masks
+                )
+                self.ref_data["appe_descriptors"].append(ref_feats)
+
+            self.ref_data["appe_descriptors"].stack()
+            self.ref_data["appe_descriptors"] = self.ref_data["appe_descriptors"].data
+
+            # save the precomputed features for future use
+            torch.save(self.ref_data["appe_descriptors"], appe_descriptors_path)
         end_time = time.time()
         logging.info(
             f"Runtime: {end_time-start_time:.02f}s, Descriptors shape: {self.ref_data['descriptors'].shape}"
@@ -220,6 +319,16 @@ class CNOS(pl.LightningModule):
             self.segmentor_model.model.setup_model(device=self.device, verbose=True)
         logging.info(f"Moving models to {self.device} done!")
 
+    def best_template_pose(self, scores, pred_idx_objects):
+        _, best_template_idxes = torch.max(scores, dim=-1)
+        N_query, N_object = best_template_idxes.shape[0], best_template_idxes.shape[1]
+        pred_idx_objects = pred_idx_objects[:, None].repeat(1, N_object)
+
+        assert N_query == pred_idx_objects.shape[0], "Prediction num != Query num"
+
+        best_template_idx = torch.gather(best_template_idxes, dim=1, index=pred_idx_objects)[:, 0]
+
+        return best_template_idx
     def find_matched_proposals(self, proposal_decriptors):
         # compute matching scores for each proposals
         scores = self.matching_config.metric(
@@ -306,7 +415,25 @@ class CNOS(pl.LightningModule):
         )[score_per_proposal > self.matching_config.confidence_thresh]
         pred_idx_objects = assigned_idx_object[idx_selected_proposals]
         pred_scores = score_per_proposal[idx_selected_proposals]
-        return idx_selected_proposals, pred_idx_objects, pred_scores
+
+        # compute the best view of template
+        flitered_scores = scores[idx_selected_proposals, ...]
+        best_template = self.best_template_pose(flitered_scores, pred_idx_objects)
+
+        return idx_selected_proposals, pred_idx_objects, pred_scores, best_template
+        # return idx_selected_proposals, pred_idx_objects, pred_scores
+
+    def compute_appearance_score(self, best_pose, pred_objects_idx, qurey_appe_descriptors):
+        """
+        Based on the best template, calculate appearance similarity indicated by appearance score
+        """
+        con_idx = torch.concatenate((pred_objects_idx[None, :], best_pose[None, :]), dim=0)
+        ref_appe_descriptors = self.ref_data["appe_descriptors"][con_idx[0, ...], con_idx[1, ...], ...] # N_query x N_patch x N_feature
+
+        aux_metric = MaskedPatch_MatrixSimilarity(metric="cosine", chunk_size=64)
+        appe_scores = aux_metric.compute_straight(qurey_appe_descriptors, ref_appe_descriptors)
+
+        return appe_scores, ref_appe_descriptors
 
     def test_step(self, batch, idx):
         if idx == 0:
@@ -349,7 +476,7 @@ class CNOS(pl.LightningModule):
             config=self.post_processing_config.mask_post_processing
         )
         # compute descriptors
-        query_decriptors = self.descriptor_model(image_np, detections)
+        query_decriptors, query_appe_descriptors = self.descriptor_model(image_np, detections)
         if self.use_adapter:
             with torch.no_grad():
                 query_decriptors = self.adapter(query_decriptors)
@@ -361,11 +488,20 @@ class CNOS(pl.LightningModule):
             idx_selected_proposals,
             pred_idx_objects,
             pred_scores,
+            best_template,
         ) = self.find_matched_proposals(query_decriptors)
 
         # update detections
         detections.filter(idx_selected_proposals)
-        detections.add_attribute("scores", pred_scores)
+        query_appe_descriptors = query_appe_descriptors[idx_selected_proposals, :]
+
+        # compute the appearance score
+        appe_scores, ref_aux_descriptor = self.compute_appearance_score(best_template, pred_idx_objects,
+                                                                        query_appe_descriptors)
+
+        # final score
+        final_score = (pred_scores + appe_scores ) / (1 + 1 )
+        detections.add_attribute("scores", final_score) # pred_scores
         detections.add_attribute("object_ids", pred_idx_objects)
         detections.apply_nms_per_object_id(
             nms_thresh=self.post_processing_config.nms_thresh
