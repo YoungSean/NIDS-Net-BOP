@@ -8,5 +8,5 @@ defaults:
   - _self_
 
 save_dir: ${machine.root_dir}/results/${name_exp}
-name_exp: add_app_WeightAdapter_gdino0.15_0502_BPR_gsamH_thr0.1_ffa_max_224_exps
+name_exp: add_app_WA_0502_BPR_gsamH_thr0.1_ffa_avg5_224_exps
 dataset_name:

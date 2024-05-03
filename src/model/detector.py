@@ -139,11 +139,9 @@ class WeightAdapter(nn.Module):
         self.scalar = scalar
 
     def forward(self, inputs):
-        # inputs = F.normalize(inputs, dim=-1, p=2)
         inputs = self.scalar * inputs
         x = self.fc(inputs)
         x = x.sigmoid()
-        # x = x * inputs + inputs
         x = x * inputs
 
         return x
@@ -500,7 +498,8 @@ class CNOS(pl.LightningModule):
                                                                         query_appe_descriptors)
 
         # final score
-        final_score = (pred_scores + appe_scores ) / (1 + 1 )
+        ratio = 0.5
+        final_score = ratio*pred_scores + (1-ratio)*appe_scores
         detections.add_attribute("scores", final_score) # pred_scores
         detections.add_attribute("object_ids", pred_idx_objects)
         detections.apply_nms_per_object_id(
