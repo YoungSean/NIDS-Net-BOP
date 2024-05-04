@@ -215,7 +215,7 @@ class CNOS(pl.LightningModule):
         self.use_adapter = True
         if self.use_adapter:
             self.adapter_type = 'weight'
-            dataset_name = 'icbin'
+            dataset_name = 'itodd'
             if self.adapter_type == 'clip':
                 weight_name = f"{dataset_name}_clip_temp_0.05_epoch_100_lr_0.0001_bs_1024_vec_reduction_4_L2e4_vitl_reg_weights.pth"
                 model_path = os.path.join("./adapter_weights", weight_name)
@@ -236,9 +236,9 @@ class CNOS(pl.LightningModule):
         logging.info("Initializing reference objects ...")
 
         start_time = time.time()
-        self.ref_data = {"descriptors": BatchedData(None), "appe_descriptors": BatchedData(None)}
-        descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors.pth") # for vitl_reg dinov2
-        # vox_descriptors_path = osp.join(self.ref_dataset.template_dir, "lmo_object_features.json")
+        self.ref_data = {"descriptors": BatchedData(None), "cls_descriptors": BatchedData(None), "appe_descriptors": BatchedData(None)}
+        descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors.pth") # for cls token
+        # cls_descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors_cls.pth")  # for cls token
         if self.onboarding_config.rendering_type == "pbr":
             descriptors_path = descriptors_path.replace(".pth", "_pbr.pth")
         if (
@@ -262,16 +262,42 @@ class CNOS(pl.LightningModule):
             ):
                 ref_imgs = self.ref_dataset[idx]["templates"].to(self.device)
                 ref_masks = self.ref_dataset[idx]["template_masks"].to(self.device)
-                ref_feats = self.descriptor_model.compute_features(
+                FFA_feats, _, _ = self.descriptor_model.compute_features(
                     ref_imgs, token_name="x_norm_clstoken", masks=ref_masks
                 )
-                self.ref_data["descriptors"].append(ref_feats)
+                self.ref_data["descriptors"].append(FFA_feats)
 
             self.ref_data["descriptors"].stack()  # N_objects x descriptor_size
             self.ref_data["descriptors"] = self.ref_data["descriptors"].data
 
             # save the precomputed features for future use
             torch.save(self.ref_data["descriptors"], descriptors_path)
+
+        # # Loading cls token
+        # if self.onboarding_config.rendering_type == "pbr":
+        #     cls_descriptors_path = cls_descriptors_path.replace(".pth", "_pbr.pth")
+        # if (
+        #     os.path.exists(cls_descriptors_path)
+        #     and not self.onboarding_config.reset_descriptors
+        # ):
+        #     self.ref_data["cls_descriptors"] = torch.load(cls_descriptors_path).to(self.device)
+        # else:
+        #     for idx in tqdm(
+        #         range(len(self.ref_dataset)),
+        #         desc="Computing class token descriptors ...",
+        #     ):
+        #         ref_imgs = self.ref_dataset[idx]["templates"].to(self.device)
+        #         ref_masks = self.ref_dataset[idx]["template_masks"].to(self.device)
+        #         _, _, cls_feats = self.descriptor_model.compute_features(
+        #             ref_imgs, token_name="x_norm_clstoken", masks=ref_masks
+        #         )
+        #         self.ref_data["cls_descriptors"].append(cls_feats)
+        #
+        #     self.ref_data["cls_descriptors"].stack()
+        #     self.ref_data["cls_descriptors"] = self.ref_data["cls_descriptors"].data
+        #
+        #     # save the precomputed features for future use
+        #     torch.save(self.ref_data["cls_descriptors"], cls_descriptors_path)
 
         # Loading appearance descriptors
         appe_descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors_appe.pth")
@@ -456,17 +482,19 @@ class CNOS(pl.LightningModule):
 
         # run propoals
         proposal_stage_start_time = time.time()
-        image_pil = Image.fromarray(image_np).convert("RGB")
-        bboxes, phrases, gdino_conf = self.gdino.predict(image_pil, "objects")
-        w, h = image_pil.size  # Get image width and height
-        # Scale bounding boxes to match the original image size
-        image_pil_bboxes = self.gdino.bbox_to_scaled_xyxy(bboxes, w, h)
-        image_pil_bboxes, masks = self.SAM.predict(image_pil, image_pil_bboxes)
-        proposals = dict()
-        proposals["masks"] = masks.squeeze(1).to(torch.float32)  # to N x H x W, torch.float32 type as the output of fastSAM
-        proposals["boxes"] = image_pil_bboxes
-
-        # proposals = self.segmentor_model.generate_masks(image_np)
+        use_Gsam = True
+        if use_Gsam:
+            image_pil = Image.fromarray(image_np).convert("RGB")
+            bboxes, phrases, gdino_conf = self.gdino.predict(image_pil, "objects")
+            w, h = image_pil.size  # Get image width and height
+            # Scale bounding boxes to match the original image size
+            image_pil_bboxes = self.gdino.bbox_to_scaled_xyxy(bboxes, w, h)
+            image_pil_bboxes, masks = self.SAM.predict(image_pil, image_pil_bboxes)
+            proposals = dict()
+            proposals["masks"] = masks.squeeze(1).to(torch.float32)  # to N x H x W, torch.float32 type as the output of fastSAM
+            proposals["boxes"] = image_pil_bboxes
+        else:
+            proposals = self.segmentor_model.generate_masks(image_np)
 
         # init detections with masks and boxes
         detections = Detections(proposals)
@@ -474,7 +502,8 @@ class CNOS(pl.LightningModule):
             config=self.post_processing_config.mask_post_processing
         )
         # compute descriptors
-        query_decriptors, query_appe_descriptors = self.descriptor_model(image_np, detections)
+        FFA_decriptors, query_appe_descriptors, query_cls_descriptors = self.descriptor_model(image_np, detections)
+        query_decriptors = FFA_decriptors
         if self.use_adapter:
             with torch.no_grad():
                 query_decriptors = self.adapter(query_decriptors)
@@ -498,8 +527,8 @@ class CNOS(pl.LightningModule):
                                                                         query_appe_descriptors)
 
         # final score
-        ratio = 0.5
-        final_score = ratio*pred_scores + (1-ratio)*appe_scores
+        # final_score = ratio*pred_scores + (1-ratio)*appe_scores
+        final_score = (pred_scores + appe_scores) / 2.0
         detections.add_attribute("scores", final_score) # pred_scores
         detections.add_attribute("object_ids", pred_idx_objects)
         detections.apply_nms_per_object_id(

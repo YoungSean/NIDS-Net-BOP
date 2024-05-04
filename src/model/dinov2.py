@@ -102,22 +102,17 @@ class CustomDINOv2(pl.LightningModule):
         masks = masks.unsqueeze(1)
         rgb = self.rgb_normalize(image_np).to(masks.device).float()
         rgbs = rgb.unsqueeze(0).repeat(num_proposals, 1, 1, 1)
-        cropped_imgs, cropped_masks = crop_images_and_masks(rgbs, masks, boxes, self.proposal_size)
-        # masked_rgbs = rgbs * masks.unsqueeze(1)
-        # processed_masked_rgbs = self.rgb_proposal_processor(
-        #     rgbs, boxes
-        # )  # [N, 3, target_size, target_size]
-        # processed_masks = self.rgb_proposal_processor(
-        #     masks, boxes
-        # )  # [N, 1, target_size, target_size]
-        # return processed_masked_rgbs, processed_masks
+        masked_rgbs = rgbs * masks
+        cropped_imgs, cropped_masks = crop_images_and_masks(masked_rgbs, masks, boxes, self.proposal_size)
+        # cropped_imgs, cropped_masks = crop_images_and_masks(rgbs, masks, boxes, self.proposal_size) # if use FFA, use this line
+
         return cropped_imgs, cropped_masks
 
     @torch.no_grad()
     def compute_features(self, images, token_name, masks):
         if token_name == "x_norm_clstoken":
             if images.shape[0] > self.chunk_size:
-                features, appearance_feat = self.forward_by_chunk(images, masks)
+                features, appearance_feat, cls_features = self.forward_by_chunk(images, masks)
             else:
                 # features = self.model(images)
                 emb = self.model.forward_features(images)
@@ -131,10 +126,12 @@ class CustomDINOv2(pl.LightningModule):
                 features = (grid * masks.permute(0, 2, 3, 1)).sum(dim=(1, 2)) / masks.sum(dim=(1, 2, 3)).unsqueeze(
                     -1)
                 appearance_feat = F.normalize((grid * masks.permute(0, 2, 3, 1)).view(len(images), mask_size*mask_size, -1), dim=-1)
+                # use class token
+                cls_features = emb["x_norm_clstoken"]
 
         else:  # get both features
             raise NotImplementedError
-        return features, appearance_feat
+        return features, appearance_feat, cls_features
 
     @torch.no_grad()
     def forward_by_chunk(self, processed_rgbs, processed_masks):
@@ -144,13 +141,15 @@ class CustomDINOv2(pl.LightningModule):
         del processed_masks
         features = BatchedData(batch_size=self.chunk_size)
         appearance_features = BatchedData(batch_size=self.chunk_size)
+        cls_features = BatchedData(batch_size=self.chunk_size)
         for idx_batch in range(len(batch_rgbs)):
-            feats, appearance_feat = self.compute_features(
+            feats, appearance_feat, cls_feats = self.compute_features(
                 batch_rgbs[idx_batch], token_name="x_norm_clstoken", masks=batch_masks[idx_batch]
             )
             features.cat(feats)
             appearance_features.cat(appearance_feat)
-        return features.data, appearance_features.data
+            cls_features.cat(cls_feats)
+        return features.data, appearance_features.data, cls_features.data
 
 
     @torch.no_grad()
