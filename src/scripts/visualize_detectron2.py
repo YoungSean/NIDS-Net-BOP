@@ -22,6 +22,7 @@ def visualize(cfg: DictConfig) -> None:
     num_max_objs = 50
     object_names = cfg.data.datasets[cfg.dataset_name].obj_names
     object_names = [name for name in object_names]
+    print(object_names)
     
     logging.info("Loading detections...")
     with open(cfg.input_file, 'r') as f:

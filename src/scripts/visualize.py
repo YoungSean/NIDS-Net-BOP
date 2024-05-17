@@ -45,6 +45,7 @@ def visualize(cfg: DictConfig) -> None:
     counter = 0
     for scene_id, image_id in tqdm(list_scene_id_and_frame_id):
         img = Image.open(f'{cfg.root_dir}/{cfg.dataset_name}/{split}/{scene_id:06d}/rgb/{image_id:06d}.png')
+        img.show()
         rgb = img.copy()
         img = np.array(img)
         masks, object_ids, scores = [], [], []
