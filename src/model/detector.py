@@ -187,20 +187,16 @@ class NIDSNET(pl.LightningModule):
         self.use_adapter = True
         if self.use_adapter:
             self.adapter_type = 'weight'
-            # dataset_name = 'lmo'
             if self.adapter_type == 'clip':
                 weight_name = f"bop_obj_shuffle_0507_clip_temp_0.05_epoch_500_lr_0.0001_bs_32_weights.pth"
                 model_path = os.path.join("./adapter_weights", weight_name)
                 self.adapter = ModifiedClipAdapter(1024, reduction=4, ratio=0.6).to('cuda')
             else:
                 weight_name = f"bop_obj_shuffle_weight_0430_temp_0.05_epoch_500_lr_0.001_bs_32_weights.pth"
-                # weight_name = "bop_cls_obj_shuffle_0510_weight_temp_0.05_epoch_500_lr_0.001_bs_32_weights.pth"
                 model_path = os.path.join("./adapter_weights", weight_name)
                 self.adapter = WeightAdapter(1024, reduction=4).to('cuda')
             self.adapter.load_state_dict(torch.load(model_path))
-            # If you plan to only evaluate the model, switch to eval mode
             self.adapter.eval()
-            print('Model weights loaded and model is set to evaluation mode.')
 
     def set_reference_objects(self):
         os.makedirs(

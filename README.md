@@ -87,7 +87,7 @@ We will upload the template embeddings soon.
 
 Access NIDS-Net's prediction results, template embeddings and the adapter model weight for seven BOP benchmark datasets [here](https://utdallas.box.com/s/yw8oazutnp1ektcnzh3hm8u5vjtq7to7).
 
-Before running the inference, please download the template embeddings and adapter model weight from the link above. You may modify the [model weight path](https://github.com/YoungSean/NIDS-Net-BOP/blob/main/src/model/detector.py#L196) and [the adapted template embedding path](https://github.com/YoungSean/NIDS-Net-BOP/blob/main/src/model/detector.py#L225) in the model file.
+Before running the inference, please download the template embeddings and adapter model weight from the link above. You may modify the [model weight path](https://github.com/YoungSean/NIDS-Net-BOP/blob/main/src/model/detector.py#L196) and [the adapted template embedding path](https://github.com/YoungSean/NIDS-Net-BOP/blob/main/src/model/detector.py#L220) in the model file.
 
 <details><summary>Click to expand</summary>
 
