@@ -8,5 +8,5 @@ defaults:
   - _self_
 
 save_dir: ${machine.root_dir}/results/${name_exp}
-name_exp: LOE_GS_cls_max_0511_BPR_224_exps
+name_exp: NIDS_NET2_FFA_APPE_max_0528_BPR_224_exps
 dataset_name:

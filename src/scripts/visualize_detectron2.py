@@ -30,6 +30,7 @@ def visualize(cfg: DictConfig) -> None:
     logging.info(f'Loaded {len(dets)} detections')
     dets = [det for det in dets if det['score'] > cfg.conf_threshold]
     logging.info(f'Keeping only {len(dets)} detections having score > {cfg.conf_threshold}')
+    lmo_transform_id = {1:0, 5:1, 6:2, 8:3, 9:4,10:5,11:6,12:7}
     
     
     # sort by (scene_id, frame_id)
@@ -38,7 +39,11 @@ def visualize(cfg: DictConfig) -> None:
     
     os.makedirs(cfg.output_dir, exist_ok=True)
     for idx, (scene_id, image_id) in tqdm(enumerate(list_scene_id_and_frame_id)):
-        img = Image.open(f'{cfg.root_dir}/{cfg.dataset_name}/{split}/{scene_id:06d}/rgb/{image_id:06d}.png')
+        if cfg.dataset_name == 'itodd':
+            img = Image.open(f'{cfg.root_dir}/{cfg.dataset_name}/{split}/{scene_id:06d}/gray/{image_id:06d}.tif')
+            img = img.convert('L')
+        else:
+            img = Image.open(f'{cfg.root_dir}/{cfg.dataset_name}/{split}/{scene_id:06d}/rgb/{image_id:06d}.png')
         rgb = img.copy()
         img = np.array(img)
         visualizer = CNOSVisualizer(object_names, img_size=img.shape[:2])
@@ -47,7 +52,10 @@ def visualize(cfg: DictConfig) -> None:
         for det in dets:
             if det['scene_id'] == scene_id and det['image_id'] == image_id:
                 masks.append(rle_to_mask(det['segmentation']))
-                object_ids.append(det['category_id']-1)
+                if cfg.dataset_name == 'lmo':
+                    object_ids.append(lmo_transform_id[det['category_id']])
+                else:
+                    object_ids.append(det['category_id']-1)
                 scores.append(det['score'])
                 bbox = det['bbox']
                 bbox = [bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3]]
@@ -59,7 +67,10 @@ def visualize(cfg: DictConfig) -> None:
         assert np.max(object_ids) <= len(object_names)
         object_ids = np.array(object_ids)
         # conver image to gray scale
-        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        if cfg.dataset_name == 'itodd':
+            gray = img
+        else:
+            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         img = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
         
         

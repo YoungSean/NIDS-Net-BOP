@@ -22,6 +22,7 @@ import torch.nn.functional as F
 import sys
 
 class MaskedPatch_MatrixSimilarity(nn.Module):
+    """Get from SAM6D."""
     def __init__(self, metric="cosine", chunk_size=64):
         super(MaskedPatch_MatrixSimilarity, self).__init__()
         self.metric = metric
@@ -146,36 +147,7 @@ class WeightAdapter(nn.Module):
 
         return x
 
-def stableMatching(preferenceMat):
-    """
-    Compute Stable Matching
-    """
-    mDict = dict()
-
-    engageMatrix = np.zeros_like(preferenceMat)
-    for i in range(preferenceMat.shape[0]):
-        tmp = preferenceMat[i]
-        sortIndices = np.argsort(tmp)[::-1]
-        mDict[i] = sortIndices.tolist()
-
-    freeManList = list(range(preferenceMat.shape[0]))
-
-    while freeManList:
-        curMan = freeManList.pop(0)
-        curWoman = mDict[curMan].pop(0)
-        if engageMatrix[:, curWoman].sum() == 0:
-            engageMatrix[curMan, curWoman] = 1
-        else:
-            engagedMan = np.where(engageMatrix[:, curWoman] == 1)[0][0]
-            if preferenceMat[engagedMan, curWoman] > preferenceMat[curMan, curWoman]:
-                freeManList.append(curMan)
-            else:
-                engageMatrix[engagedMan, curWoman] = 0
-                engageMatrix[curMan, curWoman] = 1
-                freeManList.append(engagedMan)
-    return engageMatrix
-
-class CNOS(pl.LightningModule):
+class NIDSNET(pl.LightningModule):
     def __init__(
         self,
         segmentor_model,
@@ -189,7 +161,7 @@ class CNOS(pl.LightningModule):
     ):
         # define the network
         super().__init__()
-        self.segmentor_model = segmentor_model
+        self.segmentor_model = None #segmentor_model
         self.descriptor_model = descriptor_model
 
         self.onboarding_config = onboarding_config
@@ -212,7 +184,7 @@ class CNOS(pl.LightningModule):
         self.gdino = GroundingDINOObjectPredictor()
         self.SAM = SegmentAnythingPredictor(vit_model="vit_h")
         logging.info("Initialize GDINO and SAM done!")
-        self.use_adapter = False
+        self.use_adapter = True
         if self.use_adapter:
             self.adapter_type = 'weight'
             # dataset_name = 'lmo'
@@ -221,8 +193,8 @@ class CNOS(pl.LightningModule):
                 model_path = os.path.join("./adapter_weights", weight_name)
                 self.adapter = ModifiedClipAdapter(1024, reduction=4, ratio=0.6).to('cuda')
             else:
-                # weight_name = f"bop_obj_shuffle_weight_0430_temp_0.05_epoch_500_lr_0.001_bs_32_weights.pth"
-                weight_name = "bop_cls_obj_shuffle_0510_weight_temp_0.05_epoch_500_lr_0.001_bs_32_weights.pth"
+                weight_name = f"bop_obj_shuffle_weight_0430_temp_0.05_epoch_500_lr_0.001_bs_32_weights.pth"
+                # weight_name = "bop_cls_obj_shuffle_0510_weight_temp_0.05_epoch_500_lr_0.001_bs_32_weights.pth"
                 model_path = os.path.join("./adapter_weights", weight_name)
                 self.adapter = WeightAdapter(1024, reduction=4).to('cuda')
             self.adapter.load_state_dict(torch.load(model_path))
@@ -238,76 +210,78 @@ class CNOS(pl.LightningModule):
 
         start_time = time.time()
         self.ref_data = {"descriptors": BatchedData(None), "cls_descriptors": BatchedData(None), "appe_descriptors": BatchedData(None)}
-        descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors.pth") # for cls token
-        cls_descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors_cls.pth")  # for cls token
+        descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors.pth")
+        # cls_descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors_cls.pth")  # for cls token
+        if self.onboarding_config.rendering_type == "pbr":
+            descriptors_path = descriptors_path.replace(".pth", "_pbr.pth")
+        if (
+            os.path.exists(descriptors_path)
+            and not self.onboarding_config.reset_descriptors
+        ):
+            # self.ref_data["descriptors"] = torch.load(descriptors_path).to(self.device)
+
+            # adapter_descriptors_path = osp.join(self.ref_dataset.template_dir,
+            #                                     f'{self.adapter_type}_obj_shuffle_0507_bs32_epoch_500_adapter_descriptors_pbr.json')
+            adapter_descriptors_path = osp.join(self.ref_dataset.template_dir,
+                                                f'{self.adapter_type}_obj_shuffle2_0501_bs32_epoch_500_adapter_descriptors_pbr.json')
+            with open(os.path.join(adapter_descriptors_path), 'r') as f:
+                feat_dict = json.load(f)
+
+            object_features = torch.Tensor(feat_dict['features']).cuda()
+            self.ref_data["descriptors"] = object_features.view(-1, 42, 1024)
+            print("using adapted lmo object features")
+        else:
+            for idx in tqdm(
+                range(len(self.ref_dataset)),
+                desc="Computing descriptors ...",
+            ):
+                ref_imgs = self.ref_dataset[idx]["templates"].to(self.device)
+                ref_masks = self.ref_dataset[idx]["template_masks"].to(self.device)
+                FFA_feats, _, _ = self.descriptor_model.compute_features(
+                    ref_imgs, token_name="x_norm_clstoken", masks=ref_masks
+                )
+                self.ref_data["descriptors"].append(FFA_feats)
+
+            self.ref_data["descriptors"].stack()  # N_objects x descriptor_size
+            self.ref_data["descriptors"] = self.ref_data["descriptors"].data
+
+            # save the precomputed features for future use
+            torch.save(self.ref_data["descriptors"], descriptors_path)
+
+        # # Loading cls token
         # if self.onboarding_config.rendering_type == "pbr":
-        #     descriptors_path = descriptors_path.replace(".pth", "_pbr.pth")
+        #     cls_descriptors_path = cls_descriptors_path.replace(".pth", "_pbr.pth")
         # if (
-        #     os.path.exists(descriptors_path)
+        #     os.path.exists(cls_descriptors_path)
         #     and not self.onboarding_config.reset_descriptors
         # ):
-        #     self.ref_data["descriptors"] = torch.load(descriptors_path).to(self.device)
+        #     self.ref_data["cls_descriptors"] = torch.load(cls_descriptors_path).to(self.device)
         #
         #     # adapter_descriptors_path = osp.join(self.ref_dataset.template_dir,
-        #     #                                     f'{self.adapter_type}_obj_shuffle_0507_bs32_epoch_500_adapter_descriptors_pbr.json')
+        #     #                                         f'{self.adapter_type}_cls_obj_shuffle_0510_bs32_epoch_500_adapter_descriptors_pbr.json')
         #     # with open(os.path.join(adapter_descriptors_path), 'r') as f:
         #     #     feat_dict = json.load(f)
         #     #
         #     # object_features = torch.Tensor(feat_dict['features']).cuda()
-        #     # self.ref_data["descriptors"] = object_features.view(-1, 42, 1024)
+        #     # self.ref_data["cls_descriptors"] = object_features.view(-1, 42, 1024)
         #     # print("using adapted lmo object features")
         # else:
         #     for idx in tqdm(
         #         range(len(self.ref_dataset)),
-        #         desc="Computing descriptors ...",
+        #         desc="Computing class token descriptors ...",
         #     ):
         #         ref_imgs = self.ref_dataset[idx]["templates"].to(self.device)
         #         ref_masks = self.ref_dataset[idx]["template_masks"].to(self.device)
-        #         FFA_feats, _, _ = self.descriptor_model.compute_features(
+        #         _, _, cls_feats = self.descriptor_model.compute_features(
         #             ref_imgs, token_name="x_norm_clstoken", masks=ref_masks
         #         )
-        #         self.ref_data["descriptors"].append(FFA_feats)
+        #         self.ref_data["cls_descriptors"].append(cls_feats)
         #
-        #     self.ref_data["descriptors"].stack()  # N_objects x descriptor_size
-        #     self.ref_data["descriptors"] = self.ref_data["descriptors"].data
+        #     self.ref_data["cls_descriptors"].stack()
+        #     self.ref_data["cls_descriptors"] = self.ref_data["cls_descriptors"].data
         #
         #     # save the precomputed features for future use
-        #     torch.save(self.ref_data["descriptors"], descriptors_path)
-
-        # # Loading cls token
-        if self.onboarding_config.rendering_type == "pbr":
-            cls_descriptors_path = cls_descriptors_path.replace(".pth", "_pbr.pth")
-        if (
-            os.path.exists(cls_descriptors_path)
-            and not self.onboarding_config.reset_descriptors
-        ):
-            self.ref_data["cls_descriptors"] = torch.load(cls_descriptors_path).to(self.device)
-
-            # adapter_descriptors_path = osp.join(self.ref_dataset.template_dir,
-            #                                         f'{self.adapter_type}_cls_obj_shuffle_0510_bs32_epoch_500_adapter_descriptors_pbr.json')
-            # with open(os.path.join(adapter_descriptors_path), 'r') as f:
-            #     feat_dict = json.load(f)
-            #
-            # object_features = torch.Tensor(feat_dict['features']).cuda()
-            # self.ref_data["cls_descriptors"] = object_features.view(-1, 42, 1024)
-            # print("using adapted lmo object features")
-        else:
-            for idx in tqdm(
-                range(len(self.ref_dataset)),
-                desc="Computing class token descriptors ...",
-            ):
-                ref_imgs = self.ref_dataset[idx]["templates"].to(self.device)
-                ref_masks = self.ref_dataset[idx]["template_masks"].to(self.device)
-                _, _, cls_feats = self.descriptor_model.compute_features(
-                    ref_imgs, token_name="x_norm_clstoken", masks=ref_masks
-                )
-                self.ref_data["cls_descriptors"].append(cls_feats)
-
-            self.ref_data["cls_descriptors"].stack()
-            self.ref_data["cls_descriptors"] = self.ref_data["cls_descriptors"].data
-
-            # save the precomputed features for future use
-            torch.save(self.ref_data["cls_descriptors"], cls_descriptors_path)
+        #     torch.save(self.ref_data["cls_descriptors"], cls_descriptors_path)
 
         # Loading appearance descriptors
         appe_descriptors_path = osp.join(self.ref_dataset.template_dir, "descriptors_appe.pth")
@@ -337,20 +311,21 @@ class CNOS(pl.LightningModule):
             torch.save(self.ref_data["appe_descriptors"], appe_descriptors_path)
         end_time = time.time()
         logging.info(
-            f"Runtime: {end_time-start_time:.02f}s, Descriptors shape: {self.ref_data['cls_descriptors'].shape}" #ref_data['descriptors']
+            f"Runtime: {end_time-start_time:.02f}s, Descriptors shape: {self.ref_data['descriptors'].shape}"
         )
 
 
     def move_to_device(self):
         self.descriptor_model.model = self.descriptor_model.model.to(self.device)
         self.descriptor_model.model.device = self.device
+
         # if there is predictor in the model, move it to device
-        if hasattr(self.segmentor_model, "predictor"):
-            self.segmentor_model.predictor.model = (
-                self.segmentor_model.predictor.model.to(self.device)
-            )
-        else:
-            self.segmentor_model.model.setup_model(device=self.device, verbose=True)
+        # if hasattr(self.segmentor_model, "predictor"):
+        #     self.segmentor_model.predictor.model = (
+        #         self.segmentor_model.predictor.model.to(self.device)
+        #     )
+        # else:
+        #     self.segmentor_model.model.setup_model(device=self.device, verbose=True)
         logging.info(f"Moving models to {self.device} done!")
 
     def best_template_pose(self, scores, pred_idx_objects):
@@ -365,12 +340,12 @@ class CNOS(pl.LightningModule):
         return best_template_idx
     def find_matched_proposals(self, proposal_decriptors):
         # compute matching scores for each proposals
-        # scores = self.matching_config.metric(
-        #     proposal_decriptors, self.ref_data["descriptors"]
-        # )  # N_proposals x N_objects x N_templates
         scores = self.matching_config.metric(
-            proposal_decriptors, self.ref_data["cls_descriptors"]
+            proposal_decriptors, self.ref_data["descriptors"]
         )  # N_proposals x N_objects x N_templates
+        # scores = self.matching_config.metric(
+        #     proposal_decriptors, self.ref_data["cls_descriptors"]
+        # )  # N_proposals x N_objects x N_templates
         if self.matching_config.aggregation_function == "mean":
             score_per_proposal_and_object = (
                 torch.sum(scores, dim=-1) / scores.shape[-1]
@@ -391,62 +366,6 @@ class CNOS(pl.LightningModule):
         score_per_proposal, assigned_idx_object = torch.max(
             score_per_proposal_and_object, dim=-1
         )  # N_query
-        do_matching = False
-        if do_matching:
-            score_per_proposal = []
-            assigned_idx_object = []
-            sims = score_per_proposal_and_object
-            num_object = sims.shape[1]
-            num_proposals = sims.shape[0]
-            # ------------ ranking and sorting ------------
-            # Initialization
-            sel_obj_ids = [str(v) for v in list(np.arange(num_object))]  # ids for selected obj
-            sel_roi_ids = [str(v) for v in list(np.arange(num_proposals))]  # ids for selected roi
-
-            # Padding
-            max_len = max(len(sel_roi_ids), len(sel_obj_ids))
-            sel_sims_symmetric = torch.ones((max_len, max_len)) * -1
-            sel_sims_symmetric[:len(sel_roi_ids), :len(sel_obj_ids)] = sims.clone()
-
-            pad_len = abs(len(sel_roi_ids) - len(sel_obj_ids))
-            if len(sel_roi_ids) > len(sel_obj_ids):
-                pad_obj_ids = [str(i) for i in range(num_object, num_object + pad_len)]
-                sel_obj_ids += pad_obj_ids
-            elif len(sel_roi_ids) < len(sel_obj_ids):
-                pad_roi_ids = [str(i) for i in range(len(sel_roi_ids), len(sel_roi_ids) + pad_len)]
-                sel_roi_ids += pad_roi_ids
-
-            # ------------ stable matching ------------
-            matchedMat = stableMatching(
-                sel_sims_symmetric.detach().data.cpu().numpy())  # predMat is raw predMat
-            predMat_row = np.zeros_like(
-                sel_sims_symmetric.detach().data.cpu().numpy())  # predMat_row is the result after stable matching
-            Matches = dict()
-            for i in range(matchedMat.shape[0]):
-                tmp = matchedMat[i, :]
-                a = tmp.argmax()
-                predMat_row[i, a] = tmp[a]
-                Matches[sel_roi_ids[i]] = sel_obj_ids[int(a)]
-
-            # ------------ thresholding ------------
-            preds = Matches.copy()
-            # ------------ save per scene results ------------
-            for k, v in preds.items():
-                if int(k) >= num_proposals:  # since the number of proposals is less than the number of object features
-                    break
-
-                if int(v) >= num_object:
-                    score_per_proposal.append(0.0) #will ignore this proposal later
-                    assigned_idx_object.append(-1)
-                    continue
-
-                # if float(sims[int(k), int(v)]) < score_thresh_predefined:
-                #     continue
-
-                score_per_proposal.append(float(sims[int(k), int(v)]))
-                assigned_idx_object.append(int(v))
-            score_per_proposal = torch.tensor(score_per_proposal).to(proposal_decriptors.device)
-            assigned_idx_object = torch.tensor(assigned_idx_object).to(proposal_decriptors.device)
         idx_selected_proposals = torch.arange(
             len(score_per_proposal), device=score_per_proposal.device
         )[score_per_proposal > self.matching_config.confidence_thresh]
@@ -458,7 +377,6 @@ class CNOS(pl.LightningModule):
         best_template = self.best_template_pose(flitered_scores, pred_idx_objects)
 
         return idx_selected_proposals, pred_idx_objects, pred_scores, best_template
-        # return idx_selected_proposals, pred_idx_objects, pred_scores
 
     def compute_appearance_score(self, best_pose, pred_objects_idx, qurey_appe_descriptors):
         """
@@ -495,19 +413,18 @@ class CNOS(pl.LightningModule):
 
         # run propoals
         proposal_stage_start_time = time.time()
-        use_Gsam = True
-        if use_Gsam:
-            image_pil = Image.fromarray(image_np).convert("RGB")
-            bboxes, phrases, gdino_conf = self.gdino.predict(image_pil, "objects")
-            w, h = image_pil.size  # Get image width and height
-            # Scale bounding boxes to match the original image size
-            image_pil_bboxes = self.gdino.bbox_to_scaled_xyxy(bboxes, w, h)
-            image_pil_bboxes, masks = self.SAM.predict(image_pil, image_pil_bboxes)
-            proposals = dict()
-            proposals["masks"] = masks.squeeze(1).to(torch.float32)  # to N x H x W, torch.float32 type as the output of fastSAM
-            proposals["boxes"] = image_pil_bboxes
-        else:
-            proposals = self.segmentor_model.generate_masks(image_np)
+
+        image_pil = Image.fromarray(image_np).convert("RGB")
+        bboxes, phrases, gdino_conf = self.gdino.predict(image_pil, "objects")
+        w, h = image_pil.size  # Get image width and height
+        # Scale bounding boxes to match the original image size
+        image_pil_bboxes = self.gdino.bbox_to_scaled_xyxy(bboxes, w, h)
+        image_pil_bboxes, masks = self.SAM.predict(image_pil, image_pil_bboxes)
+        proposals = dict()
+        proposals["masks"] = masks.squeeze(1).to(torch.float32)  # to N x H x W, torch.float32 type as the output of fastSAM
+        proposals["boxes"] = image_pil_bboxes
+        # else:
+        # proposals = self.segmentor_model.generate_masks(image_np)
 
         # init detections with masks and boxes
         detections = Detections(proposals)
@@ -516,7 +433,7 @@ class CNOS(pl.LightningModule):
         )
         # compute descriptors
         query_FFA_decriptors, query_appe_descriptors, query_cls_descriptors = self.descriptor_model(image_np, detections)
-        query_decriptors = query_cls_descriptors
+        query_decriptors = query_FFA_decriptors
         if self.use_adapter:
             with torch.no_grad():
                 query_decriptors = self.adapter(query_decriptors)
@@ -533,17 +450,15 @@ class CNOS(pl.LightningModule):
 
         # update detections
         detections.filter(idx_selected_proposals)
-        # query_appe_descriptors = query_appe_descriptors[idx_selected_proposals, :]
+        query_appe_descriptors = query_appe_descriptors[idx_selected_proposals, :]
 
         # compute the appearance score
-        # appe_scores, ref_aux_descriptor = self.compute_appearance_score(best_template, pred_idx_objects,
-        #                                                                 query_appe_descriptors)
+        appe_scores, ref_aux_descriptor = self.compute_appearance_score(best_template, pred_idx_objects,
+                                                                        query_appe_descriptors)
 
         # final score
-        # final_score = ratio*pred_scores + (1-ratio)*appe_scores
-        # final_score = (pred_scores + appe_scores) / 2.0
-        final_score = pred_scores
-        detections.add_attribute("scores", final_score) # pred_scores
+        final_score = (pred_scores + appe_scores) / 2.0
+        detections.add_attribute("scores", final_score)
         detections.add_attribute("object_ids", pred_idx_objects)
         detections.apply_nms_per_object_id(
             nms_thresh=self.post_processing_config.nms_thresh
