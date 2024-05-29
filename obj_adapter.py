@@ -15,7 +15,7 @@ def main(cfg : DictConfig):
     print(original_cwd)
     combine_dataset = True
     adapter_type = cfg.params.adapter_type
-    dataset_name = f'bop_obj_shuffle_0510_{adapter_type}'
+    dataset_name = f'bop_obj_shuffle_0529_{adapter_type}'
     # dataset_name = f'lmo_{adapter_type}'
     temperature = cfg.params.temperature
     batch_size = cfg.params.batch_size
@@ -23,19 +23,19 @@ def main(cfg : DictConfig):
 
     ### bop challenge datasets
     print(os.getcwd())
-    lmo_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/bop23_obj_features/lmo/descriptors_cls_pbr.pth',
+    lmo_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/datasets/bop23_challenge/datasets/templates_pyrender/lmo/descriptors_pbr.pth',
                                                      num_object=8)
-    tless_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/bop23_obj_features/tless/descriptors_cls_pbr.pth',
+    tless_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/datasets/bop23_challenge/datasets/templates_pyrender/tless/descriptors_pbr.pth',
                                                        num_object=30, label_offset=8)
-    tudl_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/bop23_obj_features/tudl/descriptors_cls_pbr.pth',
+    tudl_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/datasets/bop23_challenge/datasets/templates_pyrender/tudl/descriptors_pbr.pth',
                                                       num_object=3, label_offset=38)
-    icbin_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/bop23_obj_features/icbin/descriptors_cls_pbr.pth',
+    icbin_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/datasets/bop23_challenge/datasets/templates_pyrender/icbin/descriptors_pbr.pth',
                                                        num_object=2, label_offset=41)
-    itodd_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/bop23_obj_features/itodd/descriptors_cls_pbr.pth',
+    itodd_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/datasets/bop23_challenge/datasets/templates_pyrender/itodd/descriptors_pbr.pth',
                                                        num_object=28, label_offset=43)
-    hb_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/bop23_obj_features/hb/descriptors_cls_pbr.pth',
+    hb_bop23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/datasets/bop23_challenge/datasets/templates_pyrender/hb/descriptors_pbr.pth',
                                                     num_object=33, label_offset=71)
-    ycbv_bo23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/bop23_obj_features/ycbv/descriptors_cls_pbr.pth',
+    ycbv_bo23_feature_dataset = ObjectFeatureDataset(data_json=f'{original_cwd}/datasets/bop23_challenge/datasets/templates_pyrender/ycbv/descriptors_pbr.pth',
                                                      num_object=21, label_offset=104)
 
     cur_feature_dataset = hb_bop23_feature_dataset
@@ -77,7 +77,9 @@ def main(cfg : DictConfig):
     adapter_args = f'{dataset_name}_temp_{temperature}_epoch_{epochs}_lr_{learning_rate}_bs_{batch_size}'
     if save_model:
         # Assuming your model is named 'model'
-        model_path = f'{original_cwd}/adapter_weights/bop23/{adapter_args}_weights.pth'  # Define the path where you want to save the model
+        model_output_dir = f'{original_cwd}/adapter_weights/bop23'
+        os.makedirs(model_output_dir, exist_ok=True)
+        model_path = f'{model_output_dir}/{adapter_args}_weights.pth'  # Define the path where you want to save the model
         torch.save(model.state_dict(), model_path)
 
         print(f'Model weights saved to {model_path}')

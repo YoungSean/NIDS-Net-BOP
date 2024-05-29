@@ -218,10 +218,8 @@ class NIDSNET(pl.LightningModule):
             os.path.exists(descriptors_path)
             and not self.onboarding_config.reset_descriptors
         ):
-            # self.ref_data["descriptors"] = torch.load(descriptors_path).to(self.device)
+            # self.ref_data["descriptors"] = torch.load(descriptors_path).to(self.device) # if you want to use the original template embedding, uncomment here.
 
-            # adapter_descriptors_path = osp.join(self.ref_dataset.template_dir,
-            #                                     f'{self.adapter_type}_obj_shuffle_0507_bs32_epoch_500_adapter_descriptors_pbr.json')
             adapter_descriptors_path = osp.join(self.ref_dataset.template_dir,
                                                 f'{self.adapter_type}_obj_shuffle2_0501_bs32_epoch_500_adapter_descriptors_pbr.json')
             with open(os.path.join(adapter_descriptors_path), 'r') as f:
@@ -229,7 +227,7 @@ class NIDSNET(pl.LightningModule):
 
             object_features = torch.Tensor(feat_dict['features']).cuda()
             self.ref_data["descriptors"] = object_features.view(-1, 42, 1024)
-            print("using adapted lmo object features")
+            print("using adapted object features")
         else:
             for idx in tqdm(
                 range(len(self.ref_dataset)),

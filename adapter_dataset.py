@@ -8,7 +8,6 @@ import math
 from PIL import Image, ImageFile
 import numpy as np
 
-from utils.instance_det_dataset import InstanceDataset
 
 
 class FeatureDataset(Dataset):
@@ -85,30 +84,4 @@ class TokenDataset(Dataset):
         label = index // self.num_template_per_object + self.label_offset  # 100 objects in total
 
         return token, mask, label
-# Example usage:
-# Assuming your data is stored in a list where each element is a tuple containing (image_path, mask_path, label)
 
-if __name__ == '__main__':
-
-    img_size = 448
-    # Define transformations to be applied to the images
-    transform = transforms.Compose([
-                transforms.Resize((img_size, img_size), interpolation=transforms.InterpolationMode.BICUBIC),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ])
-
-    # Create an instance of your custom dataset
-    instance_dataset = InstanceDataset(data_dir='../database/Objects', dataset='Object', transform=transform, imsize=448)
-
-    # Create a data loader
-    batch_size = 2
-    data_loader = DataLoader(instance_dataset, batch_size=batch_size, shuffle=True)
-
-    # Iterate over the data loader to get batches of data
-    for images, masks, labels in data_loader:
-        # Your training/inference code here
-        print(images.shape)  # Shape of the batch of images
-        print(masks.shape)  # Shape of the batch of masks
-        print(labels)  # Batch of corresponding labels
-        break  # For demonstration, break after the first batch

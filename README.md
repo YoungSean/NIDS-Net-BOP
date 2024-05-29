@@ -9,7 +9,8 @@ The general implementation is this [NIDS-Net github repo](https://github.com/You
 
 [arXiv Paper: Adapting Pre-Trained Vision Models for Novel Instance Detection and Segmentation](https://arxiv.org/abs/2405.17859)
 
-
+## Foreground Feature Averaging (FFA)
+![FFA](./media/FFA3.png)
 ## Framework
 ![framework](./media/fw0.png)
 ## Example
@@ -84,11 +85,23 @@ We will upload the template embeddings soon.
 
 ##  Inference on [BOP datasets](https://bop.felk.cvut.cz/datasets/)
 
-Access NIDS-Net's prediction results for seven BOP benchmark datasets [here TODO]().
+Access NIDS-Net's prediction results, template embeddings and the adapter model weight for seven BOP benchmark datasets [here](https://utdallas.box.com/s/yw8oazutnp1ektcnzh3hm8u5vjtq7to7).
+
+Before running the inference, please download the template embeddings and adapter model weight from the link above. You may modify the [model weight path](https://github.com/YoungSean/NIDS-Net-BOP/blob/main/src/model/detector.py#L196) and [the adapted template embedding path](https://github.com/YoungSean/NIDS-Net-BOP/blob/main/src/model/detector.py#L225) in the model file.
 
 <details><summary>Click to expand</summary>
 
-1. Run NIDS-Net to get predictions of a BOP dataset:
+1. Train the weight adapter.
+You may change the folder path in the following python scripts. These paths are pointing to initial instance template embeddings.
+```shell
+python obj_adapter.py
+# now you train a common adapter for all datasets
+# Then you can use the adapter to generate the adapter template embeddings for the BOP datasets
+# the following python script will generate the adapter template embeddings.
+python transforme_adapter_feats.py
+```
+
+2. Run NIDS-Net to get predictions of a BOP dataset:
 
 ```
 export DATASET_NAME=lmo 
@@ -103,7 +116,7 @@ python run_inference.py dataset_name=$DATASET_NAME model=cnos_fast model.descrip
 ```
 Once the script completes, NIDS-Net will generate a prediction file at this [directory](https://github.com/YoungSean/Novel-Instance-Detection-BOP/blob/840d10ea4954cf9e6e4a77f2a4c49ada005406b6/configs/run_inference.yaml#L10). You can then assess the prediction on the [BOP Challenge website](https://bop.felk.cvut.cz/).
 
-2. Prediction Visualization with Detectron2
+3. Prediction Visualization with Detectron2
 
 Display masks, object IDs, and scores using Detectron2.
 ```

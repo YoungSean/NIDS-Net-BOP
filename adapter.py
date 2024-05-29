@@ -1,7 +1,7 @@
 
 import torch.nn.functional as F
 
-from utils.adapter_dataset import FeatureDataset
+from adapter_dataset import FeatureDataset
 import numpy as np
 import torch
 import torch.nn as nn
