@@ -17,7 +17,7 @@ The general implementation is this [NIDS-Net github repo](https://github.com/You
 </h3>
 </div>
 
-
+## Novel Instance Segmentation Results on BOP Benchmark
 ![bo results](./media/bop_seg.png)
 
 If you find the method useful in your research, please consider citing:
@@ -101,7 +101,7 @@ python run_inference.py dataset_name=$DATASET_NAME
 python run_inference.py dataset_name=$DATASET_NAME model=cnos_fast model.descriptor_model.model_name=dinov2_vits14 model.segmentor_model.checkpoint_path=
 
 ```
-Once the script completes, CNOS will generate a prediction file at this [directory](https://github.com/YoungSean/Novel-Instance-Detection-BOP/blob/840d10ea4954cf9e6e4a77f2a4c49ada005406b6/configs/run_inference.yaml#L10). You can then assess the prediction on the [BOP Challenge website](https://bop.felk.cvut.cz/).
+Once the script completes, NIDS-Net will generate a prediction file at this [directory](https://github.com/YoungSean/Novel-Instance-Detection-BOP/blob/840d10ea4954cf9e6e4a77f2a4c49ada005406b6/configs/run_inference.yaml#L10). You can then assess the prediction on the [BOP Challenge website](https://bop.felk.cvut.cz/).
 
 2. Prediction Visualization with Detectron2
 
