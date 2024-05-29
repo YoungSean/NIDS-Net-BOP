@@ -10,6 +10,7 @@ The general implementation is this [NIDS-Net github repo](https://github.com/You
 [arXiv Paper: Adapting Pre-Trained Vision Models for Novel Instance Detection and Segmentation](https://arxiv.org/abs/2405.17859)
 
 ## Foreground Feature Averaging (FFA)
+FFA is used to generate the initial embeddings in our framework.
 ![FFA](./media/FFA3.png)
 ## Framework
 ![framework](./media/fw0.png)
