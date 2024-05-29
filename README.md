@@ -10,7 +10,7 @@ The general implementation is this [NIDS-Net github repo](https://github.com/You
 [arXiv Paper: Adapting Pre-Trained Vision Models for Novel Instance Detection and Segmentation](https://arxiv.org/abs/2405.17859)
 
 ## Foreground Feature Averaging (FFA)
-FFA is used to generate the initial embeddings in our framework.
+[FFA](https://github.com/s-tian/CUTE) is used to generate the initial embeddings in our framework.
 ![FFA](./media/FFA3.png)
 ## Framework
 ![framework](./media/fw0.png)
@@ -131,6 +131,7 @@ python -m src.scripts.visualize_detectron2 dataset_name=$DATASET_NAME input_file
 - [SAM](https://github.com/facebookresearch/segment-anything)
 - [DINOv2](https://github.com/facebookresearch/dinov2)
 - [SAM6D](https://github.com/JiehongLin/SAM-6D)
+- [FFA](https://github.com/s-tian/CUTE) 
 
 
 ## Contact Informantion
