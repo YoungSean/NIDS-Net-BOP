@@ -4,10 +4,9 @@ NIDS-Net: A unified framework for Novel Instance Detection and Segmentation
 </h2>
 
 This repo of NIDS-Net is based on [CNOS](https://github.com/nv-nguyen/cnos) and [SAM6D](https://github.com/JiehongLin/SAM-6D). It generates the novel instance detection and segmentation (NIDS) results for the BOP challenge.
-
 The general implementation is this [NIDS-Net github repo](https://github.com/YoungSean/NIDS-Net).
 
-[arXiv Paper: Adapting Pre-Trained Vision Models for Novel Instance Detection and Segmentation](https://arxiv.org/abs/2405.17859)
+[arXiv](https://arxiv.org/abs/2405.17859), [Project](https://irvlutd.github.io/NIDSNet/)
 
 ## Foreground Feature Averaging (FFA)
 [FFA](https://github.com/s-tian/CUTE) is used to generate the initial embeddings in our framework.
