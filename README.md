@@ -11,6 +11,7 @@ The general implementation is this [NIDS-Net github repo](https://github.com/You
 
 ## Foreground Feature Averaging (FFA)
 [FFA](https://github.com/s-tian/CUTE) is used to generate the initial embeddings in our framework.
+
 ![FFA](./media/FFA3.png)
 ## Framework
 ![framework](./media/fw0.png)
