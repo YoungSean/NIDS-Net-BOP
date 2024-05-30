@@ -8,19 +8,23 @@ The general implementation is this [NIDS-Net github repo](https://github.com/You
 
 [arXiv](https://arxiv.org/abs/2405.17859), [Project](https://irvlutd.github.io/NIDSNet/)
 
+
+## Framework
+![framework](./media/fw0.png)
+
 ## Foreground Feature Averaging (FFA)
 [FFA](https://github.com/s-tian/CUTE) is used to generate the initial embeddings in our framework.
 
 ![FFA](./media/FFA3.png)
-## Framework
-![framework](./media/fw0.png)
-## Example
+
+## Segmentation Example
 ![qualitative](./media/seg_1.png)
 </h3>
 </div>
 
-## Novel Instance Segmentation Results on BOP Benchmark
-![bo results](./media/bop_seg.png)
+## BOP Benchmark
+[Ranked #1: Model-based 2D segmentation of unseen objects – Core datasets](https://bop.felk.cvut.cz/leaderboards/segmentation-unseen-bop23/core-datasets/). 
+![bop leaderboard](./media/leaderboard.png)
 
 If you find the method useful in your research, please consider citing:
 ```latex
