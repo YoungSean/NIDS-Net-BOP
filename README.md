@@ -4,7 +4,7 @@ NIDS-Net: A unified framework for Novel Instance Detection and Segmentation
 </h2>
 
 This repo of NIDS-Net is based on [CNOS](https://github.com/nv-nguyen/cnos) and [SAM6D](https://github.com/JiehongLin/SAM-6D). It generates the novel instance detection and segmentation (NIDS) results for the BOP challenge.
-The general implementation is this [NIDS-Net github repo](https://github.com/YoungSean/NIDS-Net).
+**The code has been merged into** this [NIDS-Net github repo](https://github.com/YoungSean/NIDS-Net).
 
 [arXiv](https://arxiv.org/abs/2405.17859), [Project](https://irvlutd.github.io/NIDSNet/)
 
@@ -83,8 +83,6 @@ mkdir ckpts/sam_weights
 mv sam_vit_h_4b8939.pth ckpts/sam_weights
 ```
 
-### 3. Template Embeddings
-We will upload the template embeddings soon.
 
 </details>
 
